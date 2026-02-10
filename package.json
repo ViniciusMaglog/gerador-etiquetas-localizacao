@@ -11,7 +11,7 @@
   "dependencies": {
     "bwip-js": "^4.8.0",
     "jspdf": "^3.0.4",
-    "next": "16.0.5",
+    "next": "16.0.10",
     "papaparse": "^5.5.3",
     "react": "19.2.0",
     "react-dom": "19.2.0"
