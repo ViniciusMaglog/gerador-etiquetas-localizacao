@@ -131,7 +131,7 @@ export default function HomePage() {
                 // 1. Título "LOCALIZAÇÃO"
                 doc.setFont("Helvetica", "bold");
                 doc.setFontSize(14);
-                doc.text("IDENTIFICAÇÃO DE INVENTÁRIO", centerX, 10, { align: 'center' });
+                doc.text("IDENTIFICAÇÃO DE LOCALIZAÇÃO", centerX, 10, { align: 'center' });
 
                 // 2. Imagem do Código de Barras (Centralizada)
                 // x, y, width, height
