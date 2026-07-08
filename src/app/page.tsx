@@ -5,10 +5,9 @@ import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
 import bwipjs from 'bwip-js';
 
-// Interface para os dados do CSV
 interface CsvRow {
-  LOCALIZACAO: string; // O código da localização (ex: A-01-05)
-  QUANTIDADE?: string; // Opcional, se quiser imprimir mais de uma da mesma
+  LOCALIZACAO: string;
+  QUANTIDADE?: string;
 }
 
 export default function HomePage() {
@@ -16,8 +15,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
+  const [manualLocation, setManualLocation] = useState('');
 
-  // Lida com o upload do arquivo
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -25,23 +24,19 @@ export default function HomePage() {
         setError('Por favor, selecione um arquivo .csv');
         return;
       }
-      
       setFileName(file.name);
       setError('');
-
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        delimiter: ";", // Importante: Excel em PT-BR geralmente usa ponto e vírgula
+        delimiter: ";",
         complete: (results: any) => {
-          // Verifica colunas obrigatórias
           const fileColumns = results.meta.fields || [];
           if (!fileColumns.includes('LOCALIZACAO')) {
             setError('O arquivo CSV deve conter a coluna: LOCALIZACAO');
             setCsvData([]);
             return;
           }
-
           setCsvData(results.data);
         },
         error: (err: any) => {
@@ -51,9 +46,7 @@ export default function HomePage() {
     }
   };
 
-  // Função para baixar o modelo de CSV
   const downloadTemplate = () => {
-    // \uFEFF é para o Excel reconhecer os acentos corretamente
     const csvContent = "\uFEFFLOCALIZACAO;QUANTIDADE\n" +
                        "A-01-01;1\n" + 
                        "A-01-02;2\n" + 
@@ -68,33 +61,39 @@ export default function HomePage() {
     document.body.removeChild(link);
   };
   
-  // Função Principal: Gerar PDF
   const generatePDF = async () => {
-    if (csvData.length === 0) {
-      setError("Nenhum dado para gerar.");
+    let dataToProcess: CsvRow[] = [];
+    
+    if (manualLocation.trim() !== '') {
+      dataToProcess = [{ LOCALIZACAO: manualLocation.trim().toUpperCase(), QUANTIDADE: '1' }];
+    } else {
+      dataToProcess = csvData;
+    }
+
+    if (dataToProcess.length === 0) {
+      setError("Insira uma localização manual ou carregue um arquivo CSV.");
       return;
     }
+    
     setLoading(true);
     setError('');
 
-    // Configuração do PDF: 100mm x 70mm
     const doc = new jsPDF({
       orientation: 'landscape',
       unit: 'mm',
       format: [100, 70], 
     });
 
-    // Função auxiliar para gerar a imagem do código de barras
     const generateBarcodeImage = (text: string): Promise<string> => {
       return new Promise((resolve, reject) => {
         const canvas = document.createElement('canvas');
         try {
           bwipjs.toCanvas(canvas, {
-            bcid: 'code128',       // Tipo do código de barras
-            text: text,            // Texto
-            scale: 3,              // Escala (resolução)
-            height: 15,            // Altura relativa
-            includetext: false,    // Não incluir texto pelo plugin (vamos desenhar manualmente no PDF)
+            bcid: 'code128',
+            text: text,
+            scale: 3,
+            height: 30,
+            includetext: false,
             textxalign: 'center',
           });
           resolve(canvas.toDataURL("image/png"));
@@ -106,11 +105,9 @@ export default function HomePage() {
 
     let isFirstPage = true;
 
-    for (const row of csvData) {
-        // Se não tiver quantidade, assume 1
+    for (const row of dataToProcess) {
         const quantity = parseInt(row.QUANTIDADE || '1', 10);
         const code = row.LOCALIZACAO;
-
         if (!code) continue;
 
         try {
@@ -124,26 +121,36 @@ export default function HomePage() {
                 const pageH = 70;
                 const centerX = pageW / 2;
 
-                // Desenha borda externa (opcional, ajuda no corte)
-                doc.setLineWidth(0.5);
+                // Desenha a borda externa
+                doc.setLineWidth(0.8);
                 doc.rect(2, 2, pageW - 4, pageH - 4);
 
-                // 1. Título "LOCALIZAÇÃO"
+                const maxTextWidthMM = 84;
+                const scaleX = 1.15; 
                 doc.setFont("Helvetica", "bold");
-                doc.setFontSize(14);
-                doc.text("LOCALIZAÇÃO", centerX, 10, { align: 'center' });
+                
+                let fontSize = 42;
+                doc.setFontSize(fontSize);
+                
+                let textWidthMM = (doc.getStringUnitWidth(code) * fontSize * 0.352778) * scaleX;
+                
+                while (textWidthMM > maxTextWidthMM && fontSize > 12) {
+                    fontSize -= 1;
+                    doc.setFontSize(fontSize);
+                    textWidthMM = (doc.getStringUnitWidth(code) * fontSize * 0.352778) * scaleX;
+                }
 
-                // 2. Imagem do Código de Barras (Centralizada)
-                // x, y, width, height
-                doc.addImage(barcodeImg, 'PNG', 10, 15, 80, 20);
+                const currentY = 22;
+                const startX = centerX - (textWidthMM / 2);
 
-                // 3. O Código escrito abaixo (Bem grande)
-                doc.setFont("Helvetica", "bold");
-                doc.setFontSize(14); // Fonte bem grande para leitura fácil de longe
-                doc.text(code, centerX, 42, { align: 'center' });
+                // 1. Renderiza o texto principal do topo
+                doc.text(code, startX, currentY, { horizontalScale: scaleX });
+
+                // 2. Imagem do Código de Barras centralizada (Aproveitando melhor o espaço inferior) left: 8, top: 34, width: 84, height: 28
+                doc.addImage(barcodeImg, 'PNG', 8, 34, 84, 32);
             }
         } catch (e) {
-            console.error("Erro ao gerar barcode para", code, e);
+            console.error("Erro ao gerar barcode", e);
             continue; 
         }
     }
@@ -156,8 +163,22 @@ export default function HomePage() {
     <div className="bg-slate-900 min-h-screen flex flex-col items-center justify-center p-4 text-slate-100">
         <div className="w-full max-w-md bg-slate-800 rounded-2xl shadow-2xl p-8 space-y-6 border border-slate-700">
             <div className='text-center'>
-                <h1 className="text-3xl font-extrabold text-white tracking-tight">Etiquetas de Localização</h1>
-                <p className="text-slate-400 mt-2 text-sm">Gera etiquetas 100x70mm para endereçamento de estoque.</p>
+                <h1 className="text-3xl text-white tracking-tight">Gerador de Etiqueta Palete</h1>
+                <p className="text-slate-400 mt-2 text-sm">Layout 100x70mm</p>
+            </div>
+
+            <div className="space-y-2">
+                <label htmlFor="manual-input" className="text-sm font-semibold text-slate-300 block">
+                    Digitar Localização Manual 
+                </label>
+                <input
+                    id="manual-input"
+                    type="text"
+                    placeholder="Ex: A-01-05"
+                    value={manualLocation}
+                    onChange={(e) => setManualLocation(e.target.value)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-bold uppercase transition-colors"
+                />
             </div>
 
             {error && (
@@ -168,13 +189,13 @@ export default function HomePage() {
             )}
             
             <div className="space-y-4">
-                <div className="p-4 bg-slate-700/50 rounded-lg border border-slate-600 border-dashed hover:border-emerald-500 transition-colors group">
-                    <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center justify-center w-full h-full">
+                <div className={`p-4 bg-slate-700/50 rounded-lg border border-dashed transition-colors group ${manualLocation.trim() ? 'border-slate-700 opacity-40' : 'border-slate-600 hover:border-emerald-500'}`}>
+                    <label htmlFor="file-upload" className={`flex flex-col items-center justify-center w-full h-full ${manualLocation.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                         <svg className="w-10 h-10 text-slate-400 group-hover:text-emerald-400 mb-3 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                        <span className="text-sm font-bold text-slate-300 group-hover:text-white">
-                            {fileName ? fileName : 'Clique para selecionar o CSV'}
+                        <span className="text-sm font-bold text-slate-300 group-hover:text-white text-center">
+                            {fileName ? fileName : 'Clique para carregar o arquivo CSV'}
                         </span>
-                        <input id="file-upload" type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                        <input id="file-upload" type="file" accept=".csv" onChange={handleFileUpload} disabled={manualLocation.trim() !== ''} className="hidden" />
                     </label>
                 </div>
 
@@ -183,22 +204,17 @@ export default function HomePage() {
                         onClick={downloadTemplate} 
                         className="flex items-center justify-center bg-slate-600 hover:bg-slate-500 text-white font-semibold py-3 px-4 rounded-lg transition-all text-sm"
                     >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                         Modelo CSV
                     </button>
 
                     <button 
                         onClick={generatePDF} 
-                        disabled={loading || csvData.length === 0} 
-                        className="flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-all shadow-lg shadow-emerald-900/20"
+                        disabled={loading || (csvData.length === 0 && manualLocation.trim() === '')} 
+                        className="flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-all shadow-lg"
                     >
-                        {loading ? 'Gerando...' : 'Gerar PDF'}
+                        {loading ? 'Processando...' : 'Gerar PDF'}
                     </button>
                 </div>
-            </div>
-            
-            <div className="text-center text-xs text-slate-500">
-                <p>O arquivo deve ter a coluna: <strong>LOCALIZACAO</strong></p>
             </div>
         </div>
     </div>
